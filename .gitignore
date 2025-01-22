@@ -46,3 +46,4 @@ vignettes/*.pdf
 trauma_r/.RDataTmp
 trauma_r/model_tests.nb.html
 trauma_r/cv_ridge.rds
+*.rds
