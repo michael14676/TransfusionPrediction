@@ -23,6 +23,10 @@ trauma <- fread('trauma_preprocessed_final.csv',header=TRUE)
 head(trauma)
 ```
 
+```{r}
+trauma<- trauma[,-1]
+```
+
 
 ```{r traintestsplit}
 trainIndex <- createDataPartition(trauma$transfusion, p = 0.80, list = FALSE, times = 1)
