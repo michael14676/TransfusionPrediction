@@ -49,3 +49,8 @@ trauma_r/cv_ridge.rds
 *.rds
 /trauma_r/slurmstuff
 trauma_r/.RDataTmp1
+trauma_r/.RDataTmp2
+/trauma_r/caret_files
+/trauma_r/models
+/trauma_r/old stuff
+/trauma_r/plots
