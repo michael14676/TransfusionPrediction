@@ -86,49 +86,8 @@ cv_control <- trainControl(
   allowParallel = T
 )
 
-#############################
-# Support Vector Machine (SVM)
-# Train an SVM model using caret with tuning grid for cost parameter C
-
-# Compute sigma only if the file does not exist
-sigma_file <- "sigma_value.rds"
-if (!file.exists(sigma_file)) {
-  sigma_est <- sigest(transfusion ~ ., data = trauma, frac = 1)[1] 
-  saveRDS(sigma_est, sigma_file)
-} else {
-  sigma_est <- readRDS(sigma_file)
-}
-
-
-set.seed(42)
-svm_model <- train(
-  transfusion ~ ., 
-  data = trauma, 
-  method = "svmRadial",  # Radial kernel SVM
-  tuneGrid = expand.grid(C = 2^(-4:4), sigma = sigma_est), # tuning
-  trControl = cv_control,
-  metric = "ROC"
-)
-
-# Save the trained model
-saveRDS(svm_model, file = file.path("models", "svm_radial_caret.rds"))
-
-###########
-print('radial kernel svm done:)')
-
-# End the timer
-end_time <- Sys.time()
-
-# Calculate and print the elapsed time in seconds
-elapsed_time <- as.numeric(difftime(end_time, start_time, units = "secs"))
-cat("Elapsed time for radial SVM:", elapsed_time, "seconds\n")
-
-
-
-
 ###################
 # Linear SVM
-start_time <- Sys.time()
 
 # Train an SVM model using a linear kernel
 set.seed(42)
@@ -136,7 +95,7 @@ svm_linear_model <- train(
   transfusion ~ ., 
   data = trauma, 
   method = "svmLinear",  # Linear kernel SVM
-  tuneGrid = expand.grid(C = 2^(-4:4)),  # Tune regularization parameter
+  tuneGrid = expand.grid(C = 2^(-3:3)),  # Tune regularization parameter
   trControl = cv_control,
   metric = "ROC"
 )

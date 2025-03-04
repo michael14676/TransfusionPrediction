@@ -1,0 +1,545 @@
+---
+title: "evaluations"
+author: "Michael De La Rosa"
+date: "2025-02-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Evaluation
+
+After running training the models, we can then evaluate them further to analyze their performance.
+
+## Setup
+
+### Getting Models
+
+Loading the directory of the models in order to examine them further.
+
+```{r}
+model_path <- "C:/Users/micha/OneDrive - UT Health San Antonio/UTHSCSA/Trauma/TransfusionPrediction/trauma_r/models"
+list.files(path=model_path) # check to see if works
+```
+
+### Plot Directory
+
+We will save the plots to this directory:
+
+```{r}
+plot_path <- "C:/Users/micha/OneDrive - UT Health San Antonio/UTHSCSA/Trauma/TransfusionPrediction/trauma_r/plots/"
+```
+
+
+
+## Evaluation Function
+
+This function creates a confusion matrix and an ROC curve.
+
+```{r}
+library(pROC)
+#############################
+# Model Evaluation Function
+# Function to evaluate a model using confusion matrix and ROC curve
+evaluate <- function(model, threshold, testData) {
+  # Input:
+  # - `model`: Trained model to evaluate
+  # - `threshold`: Threshold for classification
+  # - `testData`: Test dataset for evaluation
+  # Output: List containing confusion matrix and ROC curve
+
+  pred_prob <- predict(model, newdata = testData, type = "response")  # Predicted probabilities
+  pred_class <- ifelse(pred_prob > threshold, 1, 0)  # Binary predictions
+
+  # Create a confusion matrix manually as caret not available
+  table_cm <- table(Predicted = pred_class, Actual = testData$transfusion)
+
+  # Extract performance metrics
+  accuracy <- sum(diag(table_cm)) / sum(table_cm)
+  sensitivity <- table_cm[2,2] / sum(table_cm[,2])  # True Positive Rate (Recall)
+  specificity <- table_cm[1,1] / sum(table_cm[,1])  # True Negative Rate
+
+  # Store the confusion matrix and metrics in a list
+  cm <- list(
+    table = table_cm,
+    accuracy = accuracy,
+    sensitivity = sensitivity,
+    specificity = specificity
+  )
+
+
+  # Generate ROC curve
+  roc_curve <- roc(testData$transfusion, pred_prob)
+
+  return(list(cm = cm, roc = roc_curve))
+}
+```
+
+
+```{r}
+library(pROC)
+
+evaluate <- function(model, threshold, testData) {
+  # Input:
+  # - `model`: Trained model (logistic regression, ridge, lasso)
+  # - `threshold`: Threshold for classification
+  # - `testData`: Test dataset for evaluation
+  # Output: List containing confusion matrix and ROC curve
+
+  # Determine prediction type based on model class
+  if ("glm" %in% class(model)) {
+    # Standard logistic regression
+    pred_prob <- predict(model, newdata = testData, type = "response")
+  } else if ("train" %in% class(model)) {
+    # caret::train models (e.g., ridge, lasso via glmnet)
+    pred_prob <- predict(model, newdata = testData, type = "prob")[, 2]  # Extract probability for class "1"
+  } else if ("lognet" %in% class(model) || "cv.glmnet" %in% class(model)) {
+    # glmnet models (ridge/lasso)
+    x_test <- model.matrix(~ . -transfusion, data = testData)[, -1]  # Prepare test data
+    pred_prob <- predict(model, newx = x_test, type = "response", s = model$lambdaOpt)
+    pred_prob <- as.numeric(pred_prob)  # Convert to numeric
+  } else if ("randomForest" %in% class(model)) {
+    # rf models 
+    pred_prob <- predict(model, newdata = testData, type = "prob")[, 2]  
+  } else {
+     stop("Unsupported model type")
+  }
+
+  # Convert probabilities to class predictions
+  pred_class <- ifelse(pred_prob > threshold, 1, 0)
+
+  # Confusion matrix
+  table_cm <- table(Predicted = pred_class, Actual = testData$transfusion)
+
+  # Compute performance metrics
+  accuracy <- sum(diag(table_cm)) / sum(table_cm)
+  sensitivity <- ifelse(sum(table_cm[,2]) > 0, table_cm[2,2] / sum(table_cm[,2]), NA)
+  specificity <- ifelse(sum(table_cm[,1]) > 0, table_cm[1,1] / sum(table_cm[,1]), NA)
+
+  # Store the confusion matrix and metrics in a list
+  cm <- list(
+    table = table_cm,
+    accuracy = accuracy,
+    sensitivity = sensitivity,
+    specificity = specificity
+  )
+
+  # Generate ROC curve
+  roc_curve <- roc(testData$transfusion, pred_prob)
+
+  return(list(cm = cm, roc = roc_curve))
+}
+
+```
+
+We can also make a nice graphing function with ggplot2:
+
+```{r}
+graph_roc <- function(roc_object){
+  roc_data <- data.frame(
+  tpr = roc_object$sensitivities, # True positive rate (sensitivity)
+  fpr = 1 - roc_object$specificities # False positive rate (1 - specificity)
+  )
+  
+  ggplot(roc_data, aes(x = fpr, y = tpr)) +
+    geom_line(color = "blue") +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +
+    labs(title = "ROC Curve", x = "False Positive Rate", y = "True Positive Rate") +
+    theme_minimal()
+}
+```
+
+
+
+## Getting the Dataset
+
+Here we will load the dataset so we can properly evaluate these models:
+
+```{r}
+# Constants
+# Set a threshold for classification 
+THRESHOLD = 0.1
+
+# Proportion of data that was used in the training, do not change
+TRAIN_SPLIT = 0.8 
+
+# Import Dataset
+library(data.table)
+test_trauma <- fread('test_trauma.csv', header = TRUE)
+# trauma <- data[,-1]
+
+print(dim(test_trauma))
+```
+
+Now we have the same test data that was used in the model training, so we can properly evaluate the models.
+
+
+## GLMNet Functions
+
+### Logistic Regression
+
+First we will import the logistic regression model that was saved.
+
+```{r}
+lr_caret <- readRDS(file.path(model_path,'full_lr_model_caret.rds'))
+lr_model <- lr_caret$finalModel
+```
+
+Next we can use the evaluate function above, and display the confusion matrix and ROC curve:
+
+```{r}
+library(ggplot2)
+lr_results <- evaluate(lr_model, THRESHOLD, test_trauma)
+lr_cm <- lr_results$cm
+lr_ROC <- lr_results$roc
+lr_auc <- auc(lr_ROC)
+
+print(lr_cm)
+# plot(lr_ROC, main = 'ROC Curve') # Basic plot
+print(lr_auc)
+
+
+graph_roc(lr_ROC)
+
+```
+
+
+### Ridge Regression
+
+Now the same for ridge, first we import the file:
+
+```{r}
+ridge_caret <- readRDS(file.path(model_path,'ridge_model_caret.rds'))
+ridge_model <- ridge_caret$finalModel
+```
+
+We find the best lambda value below:
+```{r}
+library(ggplot2)
+
+# Convert lambda sequence and error for ggplot
+ridge_df <- data.frame(
+  log_lambda = log(ridge_caret$results$lambda),
+  mean_cv_error = ridge_caret$results$ROC
+)
+
+# Plot Ridge Regression Lambda vs. CV Error
+ggplot(ridge_df, aes(x = log_lambda, y = mean_cv_error)) +
+  geom_line(color = "blue", size = 1) +
+  geom_point(aes(x = log(ridge_caret$bestTune$lambda), y = max(mean_cv_error)), color = "red", size = 3) +
+  labs(title = "Ridge Regression: Lambda vs. CV Error",
+       x = "Log(Lambda)", y = "Mean Cross-Validation Error") +
+  theme_minimal()
+
+cat("The maximum ROC is found at lambda: ", log(ridge_caret$bestTune$lambda))
+```
+
+Note that the error in this case is ROC, so it should be the max. We find the best log(lambda) at around -5, which lines up with the plot.
+
+Now that we know what the final model is, let's take a look at the results:
+
+```{r}
+ridge_results <- evaluate(ridge_model, THRESHOLD, test_trauma)
+ridge_cm <- ridge_results$cm
+ridge_ROC <- ridge_results$roc
+ridge_auc <- auc(ridge_ROC)
+
+print(ridge_cm)
+# plot(ridge_ROC, main = 'ROC Curve') # Basic plot
+print(ridge_auc)
+
+
+graph_roc(ridge_ROC)
+
+```
+
+
+#### Ridge Coefficients
+
+We can take a look at the coefficients here:
+
+```{r}
+# Extract coefficients for Ridge model
+ridge_coefs <- as.matrix(coef(ridge_model, s = ridge_model$lambdaOpt))
+
+# Convert to dataframe for visualization
+ridge_df <- data.frame(
+  Feature = rownames(ridge_coefs),
+  Coefficient = ridge_coefs[,1]
+)
+
+# Remove intercept for better visualization
+ridge_df <- ridge_df[ridge_df$Feature != "(Intercept)", ]
+
+# Sort by absolute coefficient size
+ridge_df <- ridge_df[order(abs(ridge_df$Coefficient), decreasing = TRUE), ]
+
+# Adjust figure size by modifying text size and aspect ratio
+ridge_plot <- ggplot(ridge_df, aes(x = reorder(Feature, abs(Coefficient)), y = Coefficient)) +
+  geom_bar(stat = "identity", fill = "red") +
+  coord_flip() +
+  labs(title = "Ridge Regression Coefficients", x = "Feature", y = "Coefficient") +
+  theme_minimal() +
+  theme(text = element_text(size = 14),   # Adjust text size
+        axis.text.y = element_text(size = 10))  # Adjust y-axis text size
+
+# Save larger image if needed
+ggsave(filename = paste0(plot_path, "ridge_coefficients.png"), 
+       plot = ridge_plot, 
+       width = 12, height = 16, dpi = 300)
+
+# Display the plot
+print(ridge_plot)
+```
+
+
+
+
+### LASSO Regression
+
+Repeat the same for LASSO. First import:
+
+```{r}
+lasso_caret <- readRDS(file.path(model_path,'lasso_model_caret.rds'))
+lasso_model <- lasso_caret$finalModel
+```
+
+
+We find the best lambda value below:
+```{r}
+library(ggplot2)
+
+# Convert lambda sequence and error for ggplot
+lasso_df <- data.frame(
+  log_lambda = log(lasso_caret$results$lambda),
+  mean_cv_error = lasso_caret$results$ROC
+)
+
+# Plot lasso Regression Lambda vs. CV Error
+ggplot(lasso_df, aes(x = log_lambda, y = mean_cv_error)) +
+  geom_line(color = "blue", size = 1) +
+  geom_point(aes(x = log(lasso_caret$bestTune$lambda), y = max(mean_cv_error)), color = "red", size = 3) +
+  labs(title = "Lasso Regression: Lambda vs. CV Error",
+       x = "Log(Lambda)", y = "Mean Cross-Validation Error") +
+  theme_minimal()
+
+cat("The maximum ROC is found at lambda: ", log(lasso_caret$bestTune$lambda))
+```
+
+We see the best model is at a log(lambda) of around -7, which corresponds to the graph we just saw. After this point the performance rapidly deteriorates until none of the predictors are in the model and it becomes a coin flip.
+
+Now that we know what the final model is, let's take a look at the results:
+
+```{r}
+lasso_results <- evaluate(lasso_model, THRESHOLD, test_trauma)
+lasso_cm <- lasso_results$cm
+lasso_ROC <- lasso_results$roc
+lasso_auc <- auc(lasso_ROC)
+
+print(lasso_cm)
+# plot(lasso_ROC, main = 'ROC Curve') # Basic plot
+print(lasso_auc)
+
+
+graph_roc(lasso_ROC)
+
+```
+
+#### Lasso Coefficients
+
+Now let's look at the coefficients for Lasso:
+
+```{r}
+# Extract coefficients for Lasso model
+lasso_coefs <- as.matrix(coef(lasso_model, s = lasso_model$lambdaOpt))
+
+# Convert to dataframe for visualization
+lasso_df <- data.frame(
+  Feature = rownames(lasso_coefs),
+  Coefficient = lasso_coefs[,1]
+)
+
+# Remove intercept for better visualization
+lasso_df <- lasso_df[lasso_df$Feature != "(Intercept)", ]
+
+# Sort by absolute coefficient size
+lasso_df <- lasso_df[order(abs(lasso_df$Coefficient), decreasing = TRUE), ]
+
+# Adjust figure size by modifying text size and aspect ratio
+lasso_plot <- ggplot(lasso_df, aes(x = reorder(Feature, abs(Coefficient)), y = Coefficient)) +
+  geom_bar(stat = "identity", fill = "blue") +  # Changed to blue for Lasso
+  coord_flip() +
+  labs(title = "Lasso Regression Coefficients", x = "Feature", y = "Coefficient") +
+  theme_minimal() +
+  theme(text = element_text(size = 14),   # Adjust text size
+        axis.text.y = element_text(size = 10))  # Adjust y-axis text size
+
+# Save larger image if needed
+ggsave(filename = paste0(plot_path, "lasso_coefficients.png"), 
+       plot = lasso_plot, 
+       width = 12, height = 16, dpi = 300)
+
+# Display the plot
+print(lasso_plot)
+
+```
+
+
+### Comparison
+
+Lets compare all three:
+```{r}
+cat("Logistic Regression:", lr_auc, "\n",
+    "Ridge Regression:", ridge_auc, "\n",
+    "Lasso Regression:", lasso_auc, "\n")
+
+```
+
+
+## KNN
+
+## SVM
+
+### Radial SVM
+
+
+### Linear SVM
+
+## Tree Based Methods
+
+### Random Forest
+Took about 42 hours. First we will import the logistic regression model that was saved.
+
+```{r}
+library(randomForest)
+rf_caret <- readRDS(file.path(model_path,'random_forest_caret.rds'))
+rf_model <- rf_caret$finalModel
+```
+
+Let's take a look at which model worked the best for random forest. We can plot the ROC vs mtry values to see which was the best performing:
+
+```{r}
+# Convert lambda sequence and error for ggplot
+rf_df <- data.frame(
+  mtry = rf_caret$results$mtry,
+  mean_cv_error = rf_caret$results$ROC
+)
+
+# Plot rf mtry vs. CV Error
+ggplot(rf_df, aes(x = mtry, y = mean_cv_error)) +
+  geom_line(color = "blue", size = 1) +
+  geom_point(aes(x = rf_caret$bestTune$mtry, y = max(mean_cv_error)), color = "red", size = 3) +
+  labs(title = "Random Forest: mtry vs. CV Error",
+       x = "mtry", y = "Mean Cross-Validation Error") +
+  scale_x_continuous(limits = c(1, 35), breaks = seq(1, 35, by = 2)) +  # Set x-axis range
+  theme_minimal()
+
+cat("The maximum ROC is found at mtry: ", rf_caret$bestTune$mtry)
+```
+
+We see the best performance of random forest with mtry, the number of variables randomly sampled at each split, is 9. This gives us an AUROC of 0.84.
+
+Next we can use the evaluate function above, and display the confusion matrix and ROC curve:
+
+```{r}
+rf_results <- evaluate(rf_model, THRESHOLD, test_trauma)
+rf_cm <- rf_results$cm
+rf_ROC <- rf_results$roc
+rf_auc <- auc(rf_ROC)
+
+print(rf_cm)
+# plot(rf_ROC, main = 'ROC Curve') # Basic plot
+print(rf_auc)
+
+
+graph_roc(rf_ROC)
+
+```
+
+#### Gini Index
+The gini index can be seen as a way to show the importance of features in random forest based on how much they split the data. We can find that here:
+
+```{r}
+# Extract feature importance
+gini_importance <- rf_model$importance[, "MeanDecreaseGini"]
+
+# Convert to data frame for plotting
+importance_df <- data.frame(Feature = names(gini_importance), 
+                            Gini = gini_importance)
+
+# Order by importance
+importance_df <- importance_df[order(importance_df$Gini, decreasing = TRUE), ]
+
+# Plot Gini Importance using ggplot2
+library(ggplot2)
+gini_plot <- ggplot(importance_df, aes(x = reorder(Feature, Gini), y = Gini)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  coord_flip() +  # Flip for better readability
+  labs(title = "Variable Importance (Gini Index)", x = "Features", y = "Gini Importance") +
+  theme_minimal()
+
+# Save larger image if needed
+ggsave(filename = paste0(plot_path, "gini_plot.png"), 
+       plot = gini_plot, 
+       width = 12, height = 16, dpi = 300)
+
+# Display the plot
+print(gini_plot)
+```
+
+
+### XGBoost
+Currently training.
+
+## Neural Networks
+TBD
+
+
+## ROC Curves
+
+All ROC curves plotted together as follows, and their ROC:
+
+```{r}
+# Function to extract ROC curve data for ggplot
+get_roc_df <- function(roc_curve, model_name) {
+  data.frame(
+    specificity = 1 - roc_curve$specificities,  # 1 - Specificity (False Positive Rate)
+    sensitivity = roc_curve$sensitivities,      # Sensitivity (True Positive Rate)
+    model = model_name                          # Model name for labeling
+  )
+}
+
+# Define a list of models and their ROC objects
+roc_list <- list(
+  "Logistic Regression" = lr_ROC,
+  "Ridge Regression" = ridge_ROC,
+  "Lasso Regression" = lasso_ROC,
+  "Random Forest" = rf_ROC
+)
+
+# Convert all ROC curves into a single dataframe
+roc_data <- do.call(rbind, lapply(names(roc_list), function(model) {
+  get_roc_df(roc_list[[model]], model)
+}))
+
+# Plot all ROC curves in one graph
+ggplot(roc_data, aes(x = specificity, y = sensitivity, color = model)) +
+  geom_line(size = 1) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +  # Diagonal reference line
+  labs(title = "ROC Curves for Logistic, Ridge, and Lasso Regression",
+       x = "1 - Specificity (False Positive Rate)",
+       y = "Sensitivity (True Positive Rate)",
+       color = "Model") +
+  theme_minimal()
+
+cat("Logistic Regression:", lr_auc, "\n",
+    "Ridge Regression:", ridge_auc, "\n",
+    "Lasso Regression:", lasso_auc, "\n",
+    "Random Forest:", rf_auc)
+
+
+```
+
+Update as models get introduced.

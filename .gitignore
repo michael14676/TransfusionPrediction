@@ -54,3 +54,7 @@ trauma_r/.RDataTmp2
 /trauma_r/models
 /trauma_r/old stuff
 /trauma_r/plots
+*.code-workspace
+/trauma_r/auxillary files
+preprocesing/questions.txt
+preprocesing/tqip_models.ipynb
