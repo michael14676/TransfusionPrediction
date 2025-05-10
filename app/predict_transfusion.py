@@ -12,11 +12,13 @@ import matplotlib.pyplot as plt
 model = joblib.load("models/logistic_app_model.pkl")
 
 # Load SHAP explainer (optional)
-with open("results/logistic_app_explainer.pkl", "rb") as f:
+with open("app/results/logistic_app_explainer.pkl", "rb") as f:
     explainer = pickle.load(f)
 
-# Get feature names from original training data
-feature_names = list(pd.read_csv("trauma_incomplete_app.csv").drop(columns=["transfusion"]).columns)
+# Get feature names taken from original dataset
+with open("app/models/feature_names.pkl", "rb") as f:
+    feature_names = pickle.load(f)
+
 
 # -------------------------------
 # 2. Streamlit App Layout
