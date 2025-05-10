@@ -59,3 +59,10 @@ trauma_r/.RDataTmp2
 /trauma_r/auxillary files
 preprocesing/questions.txt
 preprocesing/tqip_models.ipynb
+/optuna
+/trauma_r/__pycache__
+neural_networks/IGNORE.ipynb
+neural_networks/optuna_create.py
+/neural_networks/__pycache__
+/app/plots
+trauma_r/ignore_test.py

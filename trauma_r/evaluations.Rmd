@@ -103,8 +103,14 @@ evaluate <- function(model, threshold, testData) {
   } else if ("randomForest" %in% class(model)) {
     # rf models 
     pred_prob <- predict(model, newdata = testData, type = "prob")[, 2]  
+  } else if ("xgb.Booster" %in% class(model)) {
+    # xgboost model
+    # Make sure to remove the outcome column when building the matrix
+    x_test <- data.matrix(subset(testData, select = -transfusion))
+    pred_prob <- predict(model, x_test)
+
   } else {
-     stop("Unsupported model type")
+    stop("Unsupported model type")
   }
 
   # Convert probabilities to class predictions
@@ -137,6 +143,7 @@ evaluate <- function(model, threshold, testData) {
 We can also make a nice graphing function with ggplot2:
 
 ```{r}
+library(ggplot2)
 graph_roc <- function(roc_object){
   roc_data <- data.frame(
   tpr = roc_object$sensitivities, # True positive rate (sensitivity)
@@ -410,7 +417,7 @@ cat("Logistic Regression:", lr_auc, "\n",
 ## Tree Based Methods
 
 ### Random Forest
-Took about 42 hours. First we will import the logistic regression model that was saved.
+Took about 42 hours. First we will import the random forest model that was saved.
 
 ```{r}
 library(randomForest)
@@ -491,7 +498,32 @@ print(gini_plot)
 
 
 ### XGBoost
-Currently training.
+First we will import the XGBoost model that was saved. Note that this wasn't done with caret, but with xgboost module in python.
+
+```{r}
+library(xgboost)
+xgb_path <- "C:/Users/micha/OneDrive - UT Health San Antonio/UTHSCSA/Trauma/TransfusionPrediction/trauma_r/models/xgboost_cv_allpreds"
+
+xgb <- xgb.load(file.path(xgb_path,'xgb_final.model'))
+```
+
+Let's take a look at which model worked the best for random forest. We can plot the ROC vs mtry values to see which was the best performing:
+
+Let us find the AUROC and plot an ROC curve:
+
+```{r}
+xgb_results <- evaluate(xgb, THRESHOLD, test_trauma)
+xgb_cm <- xgb_results$cm
+xgb_ROC <- xgb_results$roc
+xgb_auc <- auc(xgb_ROC)
+
+print(xgb_cm)
+# plot(xgb_ROC, main = 'ROC Curve') # Basic pROC plot
+print(xgb_auc)
+
+graph_roc(xgb_ROC)
+
+```
 
 ## Neural Networks
 TBD
@@ -516,7 +548,8 @@ roc_list <- list(
   "Logistic Regression" = lr_ROC,
   "Ridge Regression" = ridge_ROC,
   "Lasso Regression" = lasso_ROC,
-  "Random Forest" = rf_ROC
+  "Random Forest" = rf_ROC,
+  "XGBoost" = xgb_ROC
 )
 
 # Convert all ROC curves into a single dataframe
@@ -525,7 +558,7 @@ roc_data <- do.call(rbind, lapply(names(roc_list), function(model) {
 }))
 
 # Plot all ROC curves in one graph
-ggplot(roc_data, aes(x = specificity, y = sensitivity, color = model)) +
+p <- ggplot(roc_data, aes(x = specificity, y = sensitivity, color = model)) +
   geom_line(size = 1) +
   geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +  # Diagonal reference line
   labs(title = "ROC Curves for Logistic, Ridge, and Lasso Regression",
@@ -537,9 +570,121 @@ ggplot(roc_data, aes(x = specificity, y = sensitivity, color = model)) +
 cat("Logistic Regression:", lr_auc, "\n",
     "Ridge Regression:", ridge_auc, "\n",
     "Lasso Regression:", lasso_auc, "\n",
-    "Random Forest:", rf_auc)
+    "Random Forest:", rf_auc, "\n",
+    "XGBoost:", xgb_auc, "\n")
 
+print(p)
 
+ggsave(
+  filename = file.path(plot_path, "combined_roc_prehospital.png"),
+  plot = p,
+  width = 8,
+  height = 6,
+  dpi = 300
+)
 ```
 
 Update as models get introduced.
+
+
+
+
+# Preshospital Filter Models
+
+This is using the filter_prehospital function, so it is removing unnecessary variables.
+
+```{r}
+# get prehospital filter
+source('subset_selection.R')
+test_prehospital <- filter_prehospital(test_trauma)
+```
+
+## Logistic Regression
+
+```{r}
+lr_prehosp <- readRDS(file.path(model_path,'full_lr_model_prehospital_filter.rds'))
+lr_model <- lr_prehosp$finalModel
+
+library(ggplot2)
+lr_results <- evaluate(lr_model, THRESHOLD, test_prehospital)
+lr_cm <- lr_results$cm
+lr_ROC <- lr_results$roc
+lr_auc <- auc(lr_ROC)
+
+print(lr_cm)
+# plot(lr_ROC, main = 'ROC Curve') # Basic plot
+print(lr_auc)
+```
+
+
+## Ridge Regression
+
+```{r}
+ridge_prehosp <- readRDS(file.path(model_path,'ridge_model_prehospital_filter.rds'))
+ridge_model <- ridge_prehosp$finalModel
+
+ridge_results <- evaluate(ridge_model, THRESHOLD, test_prehospital)
+ridge_cm <- ridge_results$cm
+ridge_ROC <- ridge_results$roc
+ridge_auc <- auc(ridge_ROC)
+
+print(ridge_cm)
+# plot(ridge_ROC, main = 'ROC Curve') # Basic plot
+print(ridge_auc)
+```
+
+## LASSO
+
+```{r}
+lasso_prehosp <- readRDS(file.path(model_path,'lasso_model_prehospital_filter.rds'))
+lasso_model <- lasso_prehosp$finalModel
+
+lasso_results <- evaluate(lasso_model, THRESHOLD, test_prehospital)
+lasso_cm <- lasso_results$cm
+lasso_ROC <- lasso_results$roc
+lasso_auc <- auc(lasso_ROC)
+
+print(lasso_cm)
+# plot(lasso_ROC, main = 'ROC Curve') # Basic plot
+print(lasso_auc)
+```
+
+## RF
+
+```{r}
+library(randomForest)
+rf_prehosp <- readRDS(file.path(model_path,'random_forest_prehospital_filter.rds'))
+rf_model <- rf_prehosp$finalModel
+
+rf_results <- evaluate(rf_model, THRESHOLD, test_prehospital)
+rf_cm <- rf_results$cm
+rf_ROC <- rf_results$roc
+rf_auc <- auc(rf_ROC)
+
+print(rf_cm)
+# plot(rf_ROC, main = 'ROC Curve') # Basic plot
+print(rf_auc)
+
+```
+
+
+## XGBoost
+
+```{r}
+library(xgboost)
+xgb_path <- "C:/Users/micha/OneDrive - UT Health San Antonio/UTHSCSA/Trauma/TransfusionPrediction/trauma_r/models"
+
+xgb <- xgb.load(file.path(xgb_path,'xgb_final_prehospital_filter.model'))
+
+
+
+xgb_results <- evaluate(xgb, THRESHOLD, test_prehospital)
+xgb_cm <- xgb_results$cm
+xgb_ROC <- xgb_results$roc
+xgb_auc <- auc(xgb_ROC)
+
+print(xgb_cm)
+# plot(xgb_ROC, main = 'ROC Curve') # Basic pROC plot
+print(xgb_auc)
+```
+
