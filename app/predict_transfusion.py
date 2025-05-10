@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 # -------------------------------
 # 1. Load the saved pipeline
 # -------------------------------
-model = joblib.load("models/logistic_app_model.pkl")
+model = joblib.load("app/models/logistic_app_model.pkl")
 
 # Load SHAP explainer (optional)
 with open("app/results/logistic_app_explainer.pkl", "rb") as f:
